@@ -1,0 +1,22 @@
+# Virtual environments local setups
+venv/
+.venv/
+ENV/
+
+# System Environment configuration parameters
+.env
+.env.production
+
+# Cache and testing temporary analytics metrics files
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# Local runtime testing databases snapshots instances
+*.db
+*.sqlite
+
+# Ingested production binary asset uploads attachments
+app/storage/uploads/
+*.pdf
+*.docx

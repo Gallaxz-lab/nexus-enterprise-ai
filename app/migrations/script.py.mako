@@ -1,0 +1,28 @@
+"""${message}
+
+Revision ID: ${up_revision}
+Revises: ${down_revision}
+Create Date: ${create_date}
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+${imports}
+
+# revision identifiers, used by Alembic.
+revision: str = ${repr(up_revision)}
+down_revision: Union[str, None] = ${repr(down_revision)}
+branch_labels: Union[str, Sequence[str], None] = ${repr(branch_labels)}
+depends_on: Union[str, Sequence[str], None] = ${repr(depends_on)}
+
+
+def upgrade() -> None:
+    ${upgrade_defines if upgrade_defines else "pass"}
+    ${upgrade_ops if upgrade_ops else "pass"}
+
+
+def downgrade() -> None:
+    ${downgrade_defines if downgrade_defines else "pass"}
+    ${downgrade_ops if downgrade_ops else "pass"}

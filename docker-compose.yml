@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  nexus-postgres:
+    image: postgres:15-alpine
+    container_name: nexus-postgres-prod
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-@Won083104}
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d nexus_production"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  nexus-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nexus-api-prod
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://postgres:@Won083104@nexus-postgres:5432/postgres
+      - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-openai}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+    depends_on:
+      nexus-postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata_prod:
