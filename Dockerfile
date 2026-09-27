@@ -11,11 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+# Added --no-warn-script-location to clean out standard pip warnings completely
+RUN pip install --no-cache-dir --user --no-warn-script-location -r requirements.txt
 
 # ======================================================================================
 # STAGE 2: PRODUCTION RUNTIME ENVIRONMENT
-# =================────────────────=====================================================
+# ======================================================================================
 FROM python:3.11-slim as runner
 
 WORKDIR /workspace
@@ -25,16 +26,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Transfer safely isolated wheel configurations from builder layer
-COPY --from=builder /root/.local /root/.local
+# Create a non-privileged user space context first
+RUN useradd -u 8888 -m nexususer
+
+# Transfer wheels directly into the non-privileged user's directory namespace
+COPY --from=builder /root/.local /home/nexususer/.local
 COPY . .
 
-ENV PATH=/root/.local/bin:$PATH
-ENV PYTHONUNBUFFERED=1
+# Adjust file ownership parameters to give the app runner full clearance
+RUN chown -R nexususer:nexususer /workspace /home/nexususer/.local
 
-# Create a non-privileged user space context to lock runtime execution privileges
-RUN useradd -u 8888 nexususer && chown -R nexususer:nexususer /workspace
 USER nexususer
+
+# Update paths to evaluate from the non-root local directory context instead of root
+ENV PATH=/home/nexususer/.local/bin:$PATH
+ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000
 

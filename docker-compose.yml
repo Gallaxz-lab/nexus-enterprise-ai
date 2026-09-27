@@ -1,40 +1,58 @@
 version: '3.8'
 
 services:
+  # Relational Database Storage Engine
   nexus-postgres:
     image: postgres:15-alpine
-    container_name: nexus-postgres-prod
+    container_name: nexus_core_postgres
+    restart: always
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-@Won083104}
       POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "@Won083104" # Aligned back with your password parameter signature matrix
     ports:
       - "5432:5432"
     volumes:
-      - pgdata_prod:/var/lib/postgresql/data
+      - postgres_data_volume:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d nexus_production"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - nexus_internal_network
 
+  # Core FastAPI Service Engine
   nexus-api:
+    # FIX: Build from your optimized production multi-stage Dockerfile 
+    # instead of mounting active local source trees
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: nexus-api-prod
+    container_name: nexus_core_api
+    restart: always
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+psycopg2://postgres:@Won083104@nexus-postgres:5432/postgres
+      - DATABASE_URL=postgresql://postgres:@Won083104@nexus-postgres:5432/postgres
+      - ENVIRONMENT=production
       - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-openai}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+    # FIX: Removed the runtime pip installation script command rule entirely.
+    # The container now uses the isolated uvicorn script layered safely inside your Dockerfile.
     depends_on:
       nexus-postgres:
         condition: service_healthy
+    networks:
+      - nexus_internal_network
+
+networks:
+  nexus_internal_network:
+    driver: bridge
 
 volumes:
-  pgdata_prod:
+  postgres_data_volume:
+    driver: local
