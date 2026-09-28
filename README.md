@@ -283,22 +283,9 @@ Recommended demo flow:
 
 ## Screenshots
 
-Add project screenshots under:
-
-```text
-docs/
-└── screenshots/
-    ├── dashboard.png
-    ├── talent.png
-    ├── audit.png
-    └── support.png
-```
-
-Then reference them here:
-
 ### Nexus Talent
 
-Nexus Talent Ingestion Module![alt text](image.png)
+Nexus Talent Ingestion Module ![alt text](image.png)
 Nexus Talent Job Profiles ![alt text](image-1.png)
 
 ### Nexus Audit
