@@ -298,16 +298,16 @@ Then reference them here:
 
 ### Nexus Talent
 
-![Nexus Talent Ingestion Module](![alt text](image.png))
-![Nexus Talent Job Profiles ](![alt text](image-1.png))
+Nexus Talent Ingestion Module![alt text](image.png)
+Nexus Talent Job Profiles ![alt text](image-1.png)
 
 ### Nexus Audit
 
-![Nexus Audit]([alt text](image-2.png))
+Nexus Audit ![alt text](image-2.png)
 
 ### Nexus Support
 
-![Nexus Support](![alt text](image-3.png))
+Nexus Support![alt text](image-3.png)
 
 
 ---
