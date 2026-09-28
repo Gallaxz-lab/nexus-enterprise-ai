@@ -281,24 +281,6 @@ Recommended demo flow:
 
 ---
 
-## Screenshots
-
-### Nexus Talent
-
-Nexus Talent Ingestion Module ![alt text](image.png)
-Nexus Talent Job Profiles ![alt text](image-1.png)
-
-### Nexus Audit
-
-Autonomous AUdit Engine ![alt text](image-2.png)
-
-### Nexus Support
-
-Unified AI Support Engine ![alt text](image-3.png)
-
-
----
-
 ## 5. Limitations and Future Improvements
 
 ### Implemented / demonstrated
