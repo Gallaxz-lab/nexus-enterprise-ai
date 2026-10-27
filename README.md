@@ -1,326 +1,145 @@
 # Nexus Enterprise AI
 
-**Enterprise AI platform for recruitment, financial document auditing, and customer support.**
+**An AI platform for recruitment, financial document auditing, and customer support.**
 
-Nexus Enterprise AI is a modular business AI platform that demonstrates how large language models, retrieval-augmented generation (RAG), structured business workflows, and enterprise data systems can be combined into practical internal applications.
+Nexus combines large language models, retrieval-augmented generation (RAG) and a PostgreSQL database into three business tools that share one backend.
 
-The platform is organized around three business modules:
+> **Status: in development.** The backend and API are working. A web interface is planned. This is a portfolio project that shows the architecture, not a production system for a real organization.
 
-- **Nexus Talent** — recruitment intelligence and structured candidate evaluation
-- **Nexus Audit** — financial-document analysis, auditing, and knowledge retrieval
-- **Nexus Support** — customer-service assistance grounded in business knowledge
-
-> **Portfolio project:** This repository demonstrates an end-to-end enterprise AI architecture rather than a production deployment for a real organization.
-
----
-
-## 1. Overview
-
-### The business problem
-
-Organizations often have valuable information distributed across resumes, financial documents, internal policies, product knowledge, and customer-support material. Traditional workflows require employees to manually search documents, compare information, and repeatedly perform structured tasks.
-
-This creates several problems:
-
-- Information is difficult to find quickly.
-- Manual document review is repetitive and time-consuming.
-- Business decisions can depend on inconsistent evaluation processes.
-- Customer-support teams need fast access to accurate internal knowledge.
-- Generic LLM chat interfaces do not automatically understand company-specific context.
-
-### The solution
-
-Nexus Enterprise AI provides a common backend and AI architecture for several business workflows.
-
-Instead of treating AI as a standalone chatbot, the platform connects:
-
-**Business workflow → API layer → data/retrieval layer → LLM → structured result**
-
-The same architectural foundation can therefore support different enterprise use cases while keeping domain-specific workflows separated into modules.
-
-### Intended users
-
-The platform is designed as a reference architecture for:
-
-- HR and recruitment teams
-- Finance and audit teams
-- Customer-support teams
-- Internal operations teams
-- Developers building enterprise LLM applications
+| Module | What it does |
+|---|---|
+| **Nexus Talent** | Recruitment support: structured candidate profiles and blind evaluation, with a recruiter making the final call |
+| **Nexus Audit** | Financial document analysis: finds relevant evidence in documents and reports findings |
+| **Nexus Support** | Customer support assistant that answers from approved business knowledge |
 
 ---
 
-## 2. Modules
+## 1. The problem
+
+Companies keep important information scattered across resumes, financial documents, policies and product notes. Searching it and comparing it by hand is slow and inconsistent, and a general chatbot knows nothing about a company's own data.
+
+## 2. The approach
+
+Instead of a standalone chatbot, Nexus connects a business workflow to the company's own data before the AI answers:
+
+**Business workflow → API → data and retrieval → LLM → structured result**
+
+The three modules share the same foundation, so a new use case does not need a new system.
+
+---
+
+## 3. Modules
 
 ### Nexus Talent
 
-**Recruitment intelligence and blind evaluation**
-
-**Workflow**
-
 `Candidate input → Document processing → Information extraction → Structured evaluation → Recruiter review`
 
-Capabilities demonstrated:
-
-- Candidate/resume information processing
-- Structured candidate profiles
-- Blind-evaluation workflow
-- AI-assisted candidate analysis
-- Consistent evaluation criteria
-- Human review before hiring decisions
-
-The goal is to assist recruiters with structured analysis, not replace human hiring decisions.
-
----
+- Turns resumes into structured candidate profiles
+- Blind-evaluation workflow with consistent criteria
+- Keeps a human in the loop: it assists recruiters and does not make hiring decisions
 
 ### Nexus Audit
 
-**Financial document auditing and knowledge retrieval**
+`Financial documents → Ingestion → Retrieval → AI analysis → Audit findings`
 
-**Workflow**
-
-`Financial documents → Document ingestion → Retrieval → AI analysis → Audit findings`
-
-Capabilities demonstrated:
-
-- Financial-document ingestion
-- Knowledge-base retrieval
-- Document-grounded AI analysis
-- Structured audit outputs
-- Evidence-oriented review workflow
-- Support for comparing information across business documents
-
-The retrieval layer is intended to reduce unsupported LLM responses by grounding analysis in relevant source material.
-
----
+- Ingests financial documents and retrieves the relevant passages
+- Analysis is based on the retrieved source material, which reduces unsupported answers
+- Structured outputs for evidence-based review
 
 ### Nexus Support
 
-**Customer-service knowledge platform**
+`Customer question → Knowledge retrieval → LLM response → Source-based answer`
 
-**Workflow**
-
-`Customer question → Knowledge retrieval → LLM response → Source-grounded answer`
-
-Capabilities demonstrated:
-
-- Customer-support question handling
-- Retrieval from business knowledge
-- Context-aware LLM responses
-- Structured API access
-- Centralized knowledge architecture
-
-The module is designed for support-assistant scenarios where responses should be based on approved business information rather than general model knowledge alone.
+- Answers customer questions from approved business knowledge
+- Responses are grounded in retrieved documents, not general model knowledge alone
 
 ---
 
-## 3. Architecture
-
-### High-level architecture
+## 4. Architecture
 
 ```mermaid
 flowchart TB
-    U[Business Users / Applications]
-
-    U --> API[FastAPI Application]
+    U[Users / applications] --> API[FastAPI application]
 
     API --> TALENT[Nexus Talent]
     API --> AUDIT[Nexus Audit]
     API --> SUPPORT[Nexus Support]
 
-    TALENT --> DATA[(PostgreSQL)]
-    AUDIT --> RETRIEVAL[Retrieval Pipeline]
-    SUPPORT --> RETRIEVAL
+    TALENT --> DB[(PostgreSQL)]
+    AUDIT --> RET[Retrieval pipeline]
+    SUPPORT --> RET
 
-    RETRIEVAL --> DATA
-    RETRIEVAL --> LLM[LLM Provider]
-
-    API --> INTEGRATIONS[System Integrations]
-    INTEGRATIONS --> DATA
+    RET --> DB
+    RET --> LLM[LLM provider]
 
     LLM --> API
-    DATA --> API
+    DB --> API
 ```
 
-### Core components
-
-| Layer | Technology / Component | Responsibility |
+| Layer | Technology | Responsibility |
 |---|---|---|
-| API | **FastAPI** | REST API and business workflow orchestration |
-| Database | **PostgreSQL** | Persistent application and business data |
-| AI | **LLM provider** | Natural-language reasoning and generation |
-| Retrieval | **Retrieval pipeline / RAG** | Finds relevant business context before generation |
-| Application modules | **Nexus Talent / Audit / Support** | Domain-specific workflows |
-| Integrations | **External/internal system integrations** | Connects workflows to supporting services |
-| Deployment | **Docker Compose** | Reproducible local development environment |
+| API | FastAPI | REST API and workflow control |
+| Database | PostgreSQL | Application and business data |
+| AI | LLM provider | Reasoning and text generation |
+| Retrieval | RAG pipeline | Finds relevant context before the LLM answers |
+| Deployment | Docker Compose | Reproducible local setup |
 
-### Request flow
-
-1. A user or application sends a request to the FastAPI backend.
-2. FastAPI routes the request to the appropriate Nexus module.
-3. The module retrieves relevant structured data and/or documents.
-4. The retrieval pipeline supplies relevant context to the LLM.
-5. The LLM produces an analysis or response.
-6. The backend returns a structured result to the client.
+**Request flow:** a request reaches the FastAPI backend → it is routed to the right module → the module fetches data and documents → the retrieval pipeline passes the relevant context to the LLM → the backend returns a structured result.
 
 ---
 
-## 4. Setup and Demo
+## 5. Run it locally
 
-### Prerequisites
-
-Install:
-
-- [Docker](https://www.docker.com/)
-- Docker Compose v2 (`docker compose`)
-- Git
-
-No local Python or PostgreSQL installation is required when using the provided Docker environment.
-
-### 4.1 Clone the repository
+You need **Docker**, **Docker Compose v2** and **Git**. Python and PostgreSQL do not need to be installed.
 
 ```bash
-git clone <https://github.com/Gallaxz-lab/nexus-enterprise-ai>
+git clone https://github.com/Gallaxz-lab/nexus-enterprise-ai.git
 cd nexus-enterprise-ai
-```
-
-### 4.2 Configure environment variables
-
-Create a local environment file from the example:
-
-```bash
 cp .env.example .env
 ```
 
-Then edit `.env` and provide the required configuration for your local environment.
-
-**Never commit `.env` to Git.**
-
-Example:
-
-```env
-DATABASE_URL=postgresql://<user>:<password>@postgres:5432/<database>
-LLM_API_KEY=<your-api-key>
-LLM_MODEL=<your-model>
-```
-
-Use the actual variable names already defined by this project in `.env.example`.
-
-### 4.3 Start the application
+Open `.env` and fill in the values listed in `.env.example` (database connection, LLM API key, model name). Never commit your real `.env`.
 
 ```bash
 docker compose up --build
 ```
 
-Run in detached mode if preferred:
+Then open **http://localhost:8000/docs** to try the API. (If the port differs, check `docker-compose.yml`.)
+
+Useful commands:
 
 ```bash
-docker compose up --build -d
+docker compose ps            # list running containers
+docker compose logs -f       # follow logs
+docker compose down          # stop
+docker compose down -v       # stop and delete local database data
 ```
 
-Check running containers:
-
-```bash
-docker compose ps
-```
-
-View application logs:
-
-```bash
-docker compose logs -f
-```
-
-Stop the environment:
-
-```bash
-docker compose down
-```
-
-### 4.4 Database reset
-
-For a clean local environment:
-
-```bash
-docker compose down -v
-docker compose up --build
-```
-
-> `-v` removes Docker volumes, including persisted local database data. Do not use it if you need to keep your local data.
-
-### 4.5 API documentation
-
-When the FastAPI service is running, open the automatically generated API documentation:
-
-```text
-http://localhost:8000/docs
-```
-
-Alternative ReDoc interface:
-
-```text
-http://localhost:8000/redoc
-```
-
-If the project exposes the API on a different port, use the port configured in `docker-compose.yml`.
-
-### 4.6 Sample data
-
-The repository should use synthetic/demo data for portfolio demonstrations.
-
-Recommended demo flow:
-
-1. Start the Docker environment.
-2. Load the included sample data or seed the database.
-3. Open the API documentation.
-4. Select a Nexus module.
-5. Submit a sample request.
-6. Inspect the structured response.
-7. Repeat the workflow with another module.
-
-**Do not use real candidate information, customer records, financial records, credentials, or other private business data in the public repository.**
+A demo script, `run_portfolio_demo.py`, and a helper for creating a test PDF, `create_test_pdf.py`, are included. This repository uses synthetic demo data only.
 
 ---
 
-## 5. Limitations and Future Improvements
+## 6. Current state and roadmap
 
-### Implemented / demonstrated
+**Working now**
 
-The current portfolio implementation focuses on demonstrating:
+- Modular AI workflows on a FastAPI backend
+- PostgreSQL storage with migrations (Alembic)
+- LLM integration and retrieval-based answers
+- Docker-based local setup
+- API-first access with interactive documentation
 
-- Modular enterprise AI workflows
-- FastAPI backend architecture
-- PostgreSQL-backed application data
-- LLM integration
-- Retrieval-augmented workflows
-- Domain-specific AI modules
-- Docker-based local deployment
-- API-first access to the platform
+**Planned**
 
-### Planned improvements
+- Web interface (the main next step)
+- Login and role-based access
+- Per-document permissions
+- Audit logging and monitoring
+- Automated evaluation of answer quality
+- Better retrieval (reranking, hybrid search)
+- Background processing for large document sets
+- Rate limiting and further API hardening
+- CI/CD and cloud deployment
+- Cost and token tracking
 
-The following should be treated as future enhancements rather than current capabilities unless implemented elsewhere in the repository:
-
-- Production authentication and role-based access control
-- Fine-grained document permissions
-- Full audit logging and observability
-- Automated evaluation of LLM responses
-- Retrieval quality benchmarks
-- Reranking and hybrid retrieval optimization
-- Background job processing for large document sets
-- Automated document ingestion pipelines
-- Production-grade rate limiting and API security
-- Automated testing and CI/CD
-- Cloud deployment
-- Model/provider failover
-- Cost and token monitoring
-- Human approval workflows for high-impact actions
-
-### Important scope note
-
-Nexus is a portfolio/reference implementation. It should not be presented as a production-ready enterprise system unless the relevant security, privacy, reliability, monitoring, testing, and compliance controls have been implemented and validated.
-
----
-
-## Portfolio Summary
-
-**Nexus Enterprise AI** demonstrates an end-to-end approach to building business-focused LLM applications: API development, relational data management, retrieval-augmented generation, modular workflow design, containerized deployment, and enterprise-oriented AI architecture.
+**Scope note:** Nexus is a reference implementation. It should not be treated as production-ready until security, privacy, reliability and compliance controls are built and tested.
