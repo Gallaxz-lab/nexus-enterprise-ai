@@ -7,9 +7,9 @@ services:
     container_name: nexus_core_postgres
     restart: always
     environment:
-      POSTGRES_DB: postgres
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: "@Won083104" # Aligned back with your password parameter signature matrix
+      POSTGRES_DB: "YOUR_DATABASE_NAME" # Aligned back with your database parameter signature matrix
+      POSTGRES_USER: "YOUR_USERNAME" # Aligned back with your username parameter signature matrix
+      POSTGRES_PASSWORD: "YOUR_PASSWORD" # Aligned back with your password parameter signature matrix
     ports:
       - "5432:5432"
     volumes:
@@ -34,7 +34,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:@Won083104@nexus-postgres:5432/postgres
+      - DATABASE_URL="YOUR_DATABASE_URL" # Aligned back with your database URL parameter signature matrix
       - ENVIRONMENT=production
       - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-openai}
       - OPENAI_API_KEY=${OPENAI_API_KEY}

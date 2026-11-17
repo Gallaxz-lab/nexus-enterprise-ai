@@ -115,7 +115,6 @@ docker compose down          # stop
 docker compose down -v       # stop and delete local database data
 ```
 
-<<<<<<< HEAD
 Check running containers:
 
 ```bash
@@ -176,9 +175,6 @@ Recommended demo flow:
 7. Repeat the workflow with another module.
 
 **This repo uses synthetic demo data.**
-=======
-A demo script, `run_portfolio_demo.py`, and a helper for creating a test PDF, `create_test_pdf.py`, are included. This repository uses synthetic demo data only.
->>>>>>> 3564bf5dcec101e0910e479910d507d7004443c3
 
 ---
 
