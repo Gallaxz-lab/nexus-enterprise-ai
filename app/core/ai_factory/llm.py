@@ -7,8 +7,20 @@ from pydantic import BaseModel
 from google import genai
 from google.genai import types
 from app.config import settings
+import random
+
+from google import genai
+from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+for model in client.models.list():
+    # Filter for models that support text/JSON generation
+    if "generateContent" in (model.supported_actions or []):
+        print(f"Name: {model.name} | Display: {model.display_name}")
+
 
 class AIFactory:
     """Dynamically routes text and embedding requests to verified cloud model providers."""
@@ -18,10 +30,11 @@ class AIFactory:
         client: genai.Client,
         prompt: str,
         response_schema: type[BaseModel],
-        models: list[str] = ["gemini-3.8-flash", "gemini-2.5-flash"],
+        # Replace the second model with the active fallback model from client.models.list()
+        models: list[str] = ["gemini-3.8-flash", "gemini-3.8-flash-lite"],
         max_retries: int = 3
     ) -> Any:
-        """Retries transient 503/429 errors with exponential backoff and model fallback."""
+        """Retries transient 503/429 errors across active Gemini models with exponential backoff."""
         last_exception = None
 
         for model_name in models:
@@ -40,26 +53,30 @@ class AIFactory:
                 except Exception as e:
                     last_exception = e
                     error_str = str(e)
-                    is_transient = "503" in error_str or "UNAVAILABLE" in error_str or "429" in error_str
+                    is_transient = any(code in error_str for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"))
 
                     if is_transient and attempt < max_retries - 1:
-                        wait_time = 2 ** attempt  # 1s, 2s
+                        wait_time = (2 ** attempt) + random.uniform(0.1, 0.5)
                         logger.warning(
                             f"Gemini ({model_name}) overloaded (attempt {attempt + 1}/{max_retries}). "
-                            f"Retrying in {wait_time}s..."
+                            f"Retrying in {wait_time:.2f}s..."
                         )
                         time.sleep(wait_time)
                         continue
-                    
-                    # If transient errors persist on primary model, break inner loop to try fallback model
+
                     if is_transient:
-                        logger.warning(f"Switching from {model_name} to fallback model due to persistent overload.")
+                        logger.warning(f"Switching from {model_name} to next Gemini fallback model.")
                         break
-                    
-                    # Raise immediately for non-transient errors (e.g., 400 Bad Request, 401 Invalid Key)
+
+                    # If a fallback model name returns 404, move to the next model instead of crashing
+                    if "404" in error_str or "NOT_FOUND" in error_str:
+                        logger.warning(f"Model {model_name} not found for this key. Trying next fallback.")
+                        break
+
                     raise e
 
         raise last_exception
+
 
     @staticmethod
     def generate_structured_json(
