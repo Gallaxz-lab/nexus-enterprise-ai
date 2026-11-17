@@ -11,6 +11,7 @@ from app.config import settings
 from app.modules.talent import router as talent_master_router
 from app.modules.audit import router as audits_router
 from app.modules.support import router as support_router
+from app.modules.support import widget as support_widget
 
 
 Base.metadata.create_all(bind=engine)
@@ -45,3 +46,4 @@ app.include_router(org.router)
 app.include_router(talent_master_router.router)
 app.include_router(audits_router.router)
 app.include_router(support_router.router)
+app.include_router(support_widget.router)

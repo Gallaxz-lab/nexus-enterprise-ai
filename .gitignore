@@ -23,3 +23,7 @@ app/storage/uploads/
 
 
 *.png
+
+
+*.docker-compose.yml/
+docker-compose.yml

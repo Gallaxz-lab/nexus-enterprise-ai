@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
     ANTHROPIC_API_KEY: str | None = None
+
+    # Website chat widget (WordPress plugin) - see app/modules/support/widget.py
+    WIDGET_API_KEY: str | None = None
+    WIDGET_ORG_ID: str | None = None
     
     
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

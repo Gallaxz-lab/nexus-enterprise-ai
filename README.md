@@ -277,7 +277,7 @@ Recommended demo flow:
 6. Inspect the structured response.
 7. Repeat the workflow with another module.
 
-**Do not use real candidate information, customer records, financial records, credentials, or other private business data in the public repository.**
+**This repo uses synthetic demo data.**
 
 ---
 
