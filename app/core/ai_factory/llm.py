@@ -1,4 +1,5 @@
 import time
+import random
 import hashlib
 import logging
 from typing import Any, Optional
@@ -7,20 +8,8 @@ from pydantic import BaseModel
 from google import genai
 from google.genai import types
 from app.config import settings
-import random
-
-from google import genai
-from app.config import settings
 
 logger = logging.getLogger(__name__)
-
-client = genai.Client(api_key=settings.GEMINI_API_KEY)
-
-for model in client.models.list():
-    # Filter for models that support text/JSON generation
-    if "generateContent" in (model.supported_actions or []):
-        print(f"Name: {model.name} | Display: {model.display_name}")
-
 
 class AIFactory:
     """Dynamically routes text and embedding requests to verified cloud model providers."""
@@ -30,53 +19,70 @@ class AIFactory:
         client: genai.Client,
         prompt: str,
         response_schema: type[BaseModel],
-        # Replace the second model with the active fallback model from client.models.list()
-        models: list[str] = ["gemini-3.8-flash", "gemini-3.8-flash-lite"],
-        max_retries: int = 3
+        model_name: str = "gemini-3.8-flash",
+        max_retries: int = 4
     ) -> Any:
-        """Retries transient 503/429 errors across active Gemini models with exponential backoff."""
+        """Retries transient 503/429 errors with exponential backoff and jitter."""
         last_exception = None
 
-        for model_name in models:
-            for attempt in range(max_retries):
-                try:
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=prompt,
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            response_schema=response_schema,
-                        ),
+        for attempt in range(max_retries):
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=response_schema,
+                    ),
+                )
+                return response_schema.model_validate_json(response.text)
+
+            except Exception as e:
+                last_exception = e
+                error_str = str(e)
+                is_transient = any(code in error_str for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"))
+
+                if is_transient and attempt < max_retries - 1:
+                    wait_time = (2 ** attempt) + random.uniform(0.1, 0.5)
+                    logger.warning(
+                        f"Gemini ({model_name}) overloaded (attempt {attempt + 1}/{max_retries}). "
+                        f"Retrying in {wait_time:.2f}s..."
                     )
-                    return response_schema.model_validate_json(response.text)
-
-                except Exception as e:
-                    last_exception = e
-                    error_str = str(e)
-                    is_transient = any(code in error_str for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"))
-
-                    if is_transient and attempt < max_retries - 1:
-                        wait_time = (2 ** attempt) + random.uniform(0.1, 0.5)
-                        logger.warning(
-                            f"Gemini ({model_name}) overloaded (attempt {attempt + 1}/{max_retries}). "
-                            f"Retrying in {wait_time:.2f}s..."
-                        )
-                        time.sleep(wait_time)
-                        continue
-
-                    if is_transient:
-                        logger.warning(f"Switching from {model_name} to next Gemini fallback model.")
-                        break
-
-                    # If a fallback model name returns 404, move to the next model instead of crashing
-                    if "404" in error_str or "NOT_FOUND" in error_str:
-                        logger.warning(f"Model {model_name} not found for this key. Trying next fallback.")
-                        break
-
-                    raise e
+                    time.sleep(wait_time)
+                    continue
+                
+                raise e
 
         raise last_exception
 
+    @staticmethod
+    def _call_openai_structured(prompt: str, response_schema: type[BaseModel]) -> Any:
+        from openai import OpenAI
+        client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        response = client.beta.chat.completions.parse(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            response_format=response_schema,
+        )
+        return response.choices[0].message.parsed
+
+    @staticmethod
+    def _call_anthropic_structured(prompt: str, response_schema: type[BaseModel]) -> Any:
+        from anthropic import Anthropic
+        client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model="claude-3-5-haiku-20241022",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+            tools=[{
+                "name": "structured_output",
+                "description": "Output structured JSON matching schema",
+                "input_schema": response_schema.model_json_schema()
+            }],
+            tool_choice={"type": "tool", "name": "structured_output"}
+        )
+        tool_input = response.content[0].input
+        return response_schema.model_validate(tool_input)
 
     @staticmethod
     def generate_structured_json(
@@ -91,15 +97,7 @@ class AIFactory:
             if not settings.OPENAI_API_KEY:
                 raise HTTPException(status_code=500, detail="OpenAI API key missing.")
             try:
-                from openai import OpenAI
-                client = OpenAI(api_key=settings.OPENAI_API_KEY)
-                
-                response = client.beta.chat.completions.parse(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": prompt}],
-                    response_format=response_schema,
-                )
-                return response.choices[0].message.parsed
+                return AIFactory._call_openai_structured(prompt, response_schema)
             except Exception as e:
                 raise HTTPException(status_code=502, detail=f"OpenAI SDK Error: {str(e)}")
         
@@ -112,32 +110,35 @@ class AIFactory:
                     client=client,
                     prompt=prompt,
                     response_schema=response_schema,
-                    models=["gemini-3.8-flash", "gemini-2.5-flash"]
+                    model_name="gemini-3.8-flash"
                 )
-            except Exception as e:
-                status_code = 503 if "503" in str(e) or "UNAVAILABLE" in str(e) else 502
-                raise HTTPException(status_code=status_code, detail=f"Gemini SDK Error: {str(e)}")
+            except Exception as gemini_err:
+                error_str = str(gemini_err)
+                is_overload = any(code in error_str for code in ("503", "UNAVAILABLE", "429"))
+
+                # Automatic cross-provider fallback if Gemini is overloaded and another key exists
+                if is_overload and settings.OPENAI_API_KEY:
+                    logger.warning("Gemini overloaded after retries. Falling back to OpenAI.")
+                    try:
+                        return AIFactory._call_openai_structured(prompt, response_schema)
+                    except Exception as openai_err:
+                        logger.error(f"OpenAI fallback also failed: {openai_err}")
+
+                if is_overload and settings.ANTHROPIC_API_KEY:
+                    logger.warning("Gemini overloaded after retries. Falling back to Anthropic.")
+                    try:
+                        return AIFactory._call_anthropic_structured(prompt, response_schema)
+                    except Exception as anthropic_err:
+                        logger.error(f"Anthropic fallback also failed: {anthropic_err}")
+
+                status_code = 503 if is_overload else 502
+                raise HTTPException(status_code=status_code, detail=f"Gemini SDK Error: {error_str}")
 
         elif target_provider == "anthropic":
             if not settings.ANTHROPIC_API_KEY:
                 raise HTTPException(status_code=500, detail="Anthropic API key missing.")
             try:
-                from anthropic import Anthropic
-                client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-                
-                response = client.messages.create(
-                    model="claude-3-5-haiku-20241022",
-                    max_tokens=2000,
-                    messages=[{"role": "user", "content": prompt}],
-                    tools=[{
-                        "name": "structured_output",
-                        "description": "Output structured JSON matching schema",
-                        "input_schema": response_schema.model_json_schema()
-                    }],
-                    tool_choice={"type": "tool", "name": "structured_output"}
-                )
-                tool_input = response.content[0].input
-                return response_schema.model_validate(tool_input)
+                return AIFactory._call_anthropic_structured(prompt, response_schema)
             except Exception as e:
                 raise HTTPException(status_code=502, detail=f"Anthropic SDK Error: {str(e)}")
 
