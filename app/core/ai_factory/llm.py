@@ -289,11 +289,16 @@ class AIFactory:
     @staticmethod
     def _call_mock_structured(
         prompt: str,
-        response_schema: type[BaseModel]
+        response_schema: type[BaseModel],
+        user_query: Optional[str] = None
     ) -> Any:
-        """Local VITALFORM fallback. No API key or network required."""
-        products = AIFactory._find_vitalform_products(prompt)
-        answer = AIFactory._build_mock_answer(prompt, products)
+        """Local VITALFORM fallback using the actual customer question."""
+
+        # Search only the customer's question, never the entire RAG prompt.
+        search_query = user_query if user_query else prompt
+
+        products = AIFactory._find_vitalform_products(search_query)
+        answer = AIFactory._build_mock_answer(search_query, products)
 
         context = {
             "products": products,
@@ -313,8 +318,9 @@ class AIFactory:
             )
 
         logger.warning(
-            "Using local Mock Provider. Matched %s VITALFORM product(s).",
-            len(products)
+            "Using local Mock Provider. Query: %s | Matched products: %s",
+            search_query,
+            [p["sku"] for p in products]
         )
 
         return response_schema.model_validate(mock_data)
@@ -466,7 +472,8 @@ class AIFactory:
     def generate_structured_json(
         prompt: str,
         response_schema: type[BaseModel],
-        provider: Optional[str] = None
+        provider: Optional[str] = None,
+        user_query: Optional[str] = None
     ) -> Any:
         """
         Routes structured generation to the selected provider.
@@ -477,7 +484,11 @@ class AIFactory:
 
         # Explicit local Mock mode
         if target_provider == "mock":
-            return AIFactory._call_mock_structured(prompt, response_schema)
+            return AIFactory._call_mock_structured(
+                prompt,
+                response_schema,
+                user_query=user_query
+            )
 
         if target_provider == "openai":
             if not settings.OPENAI_API_KEY:
@@ -488,7 +499,8 @@ class AIFactory:
 
             try:
                 return AIFactory._call_openai_structured(
-                    prompt, response_schema
+                    prompt,
+                    response_schema
                 )
             except Exception as e:
                 logger.exception("OpenAI generation failed.")
@@ -503,7 +515,9 @@ class AIFactory:
                     "Gemini API key missing. Falling back to local Mock Provider."
                 )
                 return AIFactory._call_mock_structured(
-                    prompt, response_schema
+                    prompt,
+                    response_schema,
+                    user_query=user_query
                 )
 
             try:
@@ -572,7 +586,9 @@ class AIFactory:
                 )
 
                 return AIFactory._call_mock_structured(
-                    prompt, response_schema
+                    prompt,
+                    response_schema,
+                    user_query=user_query
                 )
 
         elif target_provider == "anthropic":

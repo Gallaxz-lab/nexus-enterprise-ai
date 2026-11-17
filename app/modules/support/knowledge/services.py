@@ -42,7 +42,8 @@ class RAGOrchestrationService:
         # 3. Request highly structured structural output via active AI Factory
         extracted_rag_response = AIFactory.generate_structured_json(
             prompt=prompt,
-            response_schema=RAGStructuredOutputSchema
+            response_schema=RAGStructuredOutputSchema,
+            user_query=question,
         )
         
         return extracted_rag_response
