@@ -1,84 +1,138 @@
-import os
+import time
 import hashlib
-from typing import Any, Dict
+import logging
+from typing import Any, Optional
 from fastapi import HTTPException, status
 from pydantic import BaseModel
-from app.config import settings
 from google import genai
 from google.genai import types
+from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 class AIFactory:
-    """Dynamically routes text requests to verified cloud model providers."""
+    """Dynamically routes text and embedding requests to verified cloud model providers."""
     
     @staticmethod
-    def generate_structured_json(prompt: str, response_schema: type[BaseModel], provider: str = None) -> Any:
+    def _call_gemini_with_retry(
+        client: genai.Client,
+        prompt: str,
+        response_schema: type[BaseModel],
+        models: list[str] = ["gemini-3.8-flash", "gemini-2.5-flash"],
+        max_retries: int = 3
+    ) -> Any:
+        """Retries transient 503/429 errors with exponential backoff and model fallback."""
+        last_exception = None
+
+        for model_name in models:
+            for attempt in range(max_retries):
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=response_schema,
+                        ),
+                    )
+                    return response_schema.model_validate_json(response.text)
+
+                except Exception as e:
+                    last_exception = e
+                    error_str = str(e)
+                    is_transient = "503" in error_str or "UNAVAILABLE" in error_str or "429" in error_str
+
+                    if is_transient and attempt < max_retries - 1:
+                        wait_time = 2 ** attempt  # 1s, 2s
+                        logger.warning(
+                            f"Gemini ({model_name}) overloaded (attempt {attempt + 1}/{max_retries}). "
+                            f"Retrying in {wait_time}s..."
+                        )
+                        time.sleep(wait_time)
+                        continue
+                    
+                    # If transient errors persist on primary model, break inner loop to try fallback model
+                    if is_transient:
+                        logger.warning(f"Switching from {model_name} to fallback model due to persistent overload.")
+                        break
+                    
+                    # Raise immediately for non-transient errors (e.g., 400 Bad Request, 401 Invalid Key)
+                    raise e
+
+        raise last_exception
+
+    @staticmethod
+    def generate_structured_json(
+        prompt: str, 
+        response_schema: type[BaseModel], 
+        provider: Optional[str] = None
+    ) -> Any:
         """Forces the selected model to return pure data matching a strict Pydantic template."""
         target_provider = provider or settings.DEFAULT_LLM_PROVIDER
 
         if target_provider == "openai":
             if not settings.OPENAI_API_KEY:
                 raise HTTPException(status_code=500, detail="OpenAI API key missing.")
-            from openai import OpenAI
-            client = OpenAI(api_key=settings.OPENAI_API_KEY)
-            
-            response = client.beta.chat.completions.parse(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                response_format=response_schema,
-            )
-            return response.choices[0].message.parsed
+            try:
+                from openai import OpenAI
+                client = OpenAI(api_key=settings.OPENAI_API_KEY)
+                
+                response = client.beta.chat.completions.parse(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format=response_schema,
+                )
+                return response.choices[0].message.parsed
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"OpenAI SDK Error: {str(e)}")
         
         elif target_provider == "gemini":
             if not settings.GEMINI_API_KEY:
                 raise HTTPException(status_code=500, detail="Gemini API key missing.")
-    
-   
-            client = genai.Client(api_key=settings.GEMINI_API_KEY)
-
             try:
-                response = client.models.generate_content(
-                    model="gemini-3.8-flash", 
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=response_schema,  
-                    ),
+                client = genai.Client(api_key=settings.GEMINI_API_KEY)
+                return AIFactory._call_gemini_with_retry(
+                    client=client,
+                    prompt=prompt,
+                    response_schema=response_schema,
+                    models=["gemini-3.8-flash", "gemini-2.5-flash"]
                 )
-                return response_schema.model_validate_json(response.text)
-            
             except Exception as e:
-                raise HTTPException(status_code=502, detail=f"Gemini SDK Error: {str(e)}")
-
+                status_code = 503 if "503" in str(e) or "UNAVAILABLE" in str(e) else 502
+                raise HTTPException(status_code=status_code, detail=f"Gemini SDK Error: {str(e)}")
 
         elif target_provider == "anthropic":
             if not settings.ANTHROPIC_API_KEY:
                 raise HTTPException(status_code=500, detail="Anthropic API key missing.")
-            from anthropic import Anthropic
-            client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-            
-            # Anthropic handles structural outputs via built-in tool utilities
-            response = client.messages.create(
-                model="claude-3-5-haiku-20241022",
-                max_tokens=2000,
-                messages=[{"role": "user", "content": prompt}],
-                tools=[{
-                    "name": "structured_output",
-                    "description": "Output structured JSON matching schema",
-                    "input_schema": response_schema.model_json_schema()
-                }],
-                tool_choice={"type": "tool", "name": "structured_output"}
-            )
-            tool_input = response.content[0].input
-            return response_schema.model_validate(tool_input)
+            try:
+                from anthropic import Anthropic
+                client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+                
+                response = client.messages.create(
+                    model="claude-3-5-haiku-20241022",
+                    max_tokens=2000,
+                    messages=[{"role": "user", "content": prompt}],
+                    tools=[{
+                        "name": "structured_output",
+                        "description": "Output structured JSON matching schema",
+                        "input_schema": response_schema.model_json_schema()
+                    }],
+                    tool_choice={"type": "tool", "name": "structured_output"}
+                )
+                tool_input = response.content[0].input
+                return response_schema.model_validate(tool_input)
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"Anthropic SDK Error: {str(e)}")
 
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"AI Provider '{target_provider}' is unrecognized or unmapped."
             )
+
     @staticmethod
-    def generate_embedding(text_content: str, provider: str = None) -> list[float]:
-        """Dynamically interfaces with the active cloud provider to return a vector representation."""
+    def generate_embedding(text_content: str, provider: Optional[str] = None) -> list[float]:
+        """Dynamically interfaces with the active cloud provider to return a 1536-dim vector."""
         target_provider = provider or settings.DEFAULT_LLM_PROVIDER
         
         normalized_text = text_content.replace("\n", " ").strip()
@@ -95,23 +149,24 @@ class AIFactory:
                     input=[normalized_text],
                     model="text-embedding-3-small"
                 )
-                return response.data.embedding
+                return response.data[0].embedding
                 
             elif target_provider == "gemini":
                 if not settings.GEMINI_API_KEY:
                     raise ValueError("Gemini key missing")
-                import google.generativeai as genai
-                genai.configure(api_key=settings.GEMINI_API_KEY)
-                response = genai.embed_content(
-                    model="models/text-embedding-004",
-                    content=normalized_text
+                client = genai.Client(api_key=settings.GEMINI_API_KEY)
+                response = client.models.embed_content(
+                    model="gemini-embedding-001",
+                    contents=normalized_text,
+                    config=types.EmbedContentConfig(output_dimensionality=1536)
                 )
-                return response['embedding']
+                return response.embeddings[0].values
                 
             else:
-                raise ValueError("Route directly to local deterministic signature engine.")
+                raise ValueError(f"Provider '{target_provider}' routed to local deterministic engine.")
                 
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Embedding API failed ({e}). Falling back to deterministic MD5 vector.")
             hash_bytes = hashlib.md5(normalized_text.encode('utf-8')).digest()
             
             base_vector = []
