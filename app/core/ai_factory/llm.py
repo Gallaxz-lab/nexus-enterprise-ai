@@ -296,14 +296,11 @@ class AIFactory:
         model_name: str = "gemini-3.8-flash",
         max_retries: int = 4
     ) -> Any:
-        error_codes = (
+        transient_error_codes = (
             "500", "502", "503", "504",
             "INTERNAL", "UNAVAILABLE",
             "RESOURCE_EXHAUSTED", "429"
-            )
-
-        is_transient = any(code in error_str for code in error_codes)
-        
+        )
         last_exception = None
 
         for attempt in range(max_retries):
@@ -320,21 +317,27 @@ class AIFactory:
 
             except Exception as e:
                 last_exception = e
-                error_str = str(e)
-                is_transient = any(code in error_str for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"))
+                error_msg = str(e)
+                
+                is_transient = False
+                for code in transient_error_codes:
+                    if code in error_msg:
+                        is_transient = True
+                        break
 
                 if is_transient and attempt < max_retries - 1:
                     wait_time = (2 ** attempt) + random.uniform(0.1, 0.5)
                     logger.warning(
-                        f"Gemini ({model_name}) overloaded (attempt {attempt + 1}/{max_retries}). "
-                        f"Retrying in {wait_time:.2f}s..."
+                        f"Gemini ({model_name}) transient error (attempt {attempt + 1}/{max_retries}). "
+                        f"Retrying in {wait_time:.2f}s... Error: {error_msg}"
                     )
                     time.sleep(wait_time)
                     continue
-                
+
                 raise e
 
         raise last_exception
+
 
     @staticmethod
     def _call_openai_structured(prompt: str, response_schema: type[BaseModel]) -> Any:
