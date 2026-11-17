@@ -97,29 +97,38 @@ class AIFactory:
         }
     ]
 
+
     @staticmethod
     def _find_vitalform_products(prompt: str) -> list[dict]:
-        """Find products mentioned in a customer question."""
+        """Find only products explicitly requested by the customer."""
+
         query = prompt.lower()
+
         matches = []
 
         for product in AIFactory.VITALFORM_PRODUCTS:
-            searchable = [
-                product["sku"],
-                product["name_th"],
-                product["name_en"],
-                product["category"],
+            searchable_terms = [
+                product["sku"].lower(),
+                product["name_th"].lower(),
+                product["name_en"].lower(),
             ]
 
-            if any(term.lower() in query for term in searchable):
+            if any(term in query for term in searchable_terms):
                 matches.append(product)
 
-        # If the question asks about all products or comparisons,
-        # return the full catalog.
+        # Return the full catalog only when the customer explicitly
+        # asks to see all products or the product catalog.
         all_keywords = (
-            "ทั้งหมด", "all products", "ทุกสินค้า",
-            "เปรียบเทียบ", "compare", "comparison",
-            "รายการสินค้า", "catalog", "สินค้าอะไร"
+            "สินค้าทั้งหมด",
+            "รายการสินค้าทั้งหมด",
+            "สินค้าทุกชนิด",
+            "สินค้าทุกประเภท",
+            "ดูสินค้าทั้งหมด",
+            "all products",
+            "all items",
+            "full catalog",
+            "product catalog",
+            "show me everything",
         )
 
         if any(keyword in query for keyword in all_keywords):
@@ -127,39 +136,61 @@ class AIFactory:
 
         return matches
 
+
+
     @staticmethod
     def _build_mock_answer(prompt: str, products: list[dict]) -> str:
-        """Create a factual customer-facing answer from the local catalog."""
+        """Generate a customer-friendly answer using local product data."""
+
+        query = prompt.lower()
+
         disclaimer = (
-            "หมายเหตุ: นี่คือคำตอบจาก Mock Provider "
-            "โดยใช้ข้อมูลสินค้าสมมติสำหรับ Demo เท่านั้น "
-            "ไม่ใช่ข้อมูลหรือคำยืนยันจากผู้ผลิตจริง"
+            "\n\nหมายเหตุ: ข้อมูลนี้เป็นข้อมูลสินค้าสมมติ "
+            "สำหรับการสาธิตระบบ VITALFORM เท่านั้น"
         )
 
         if not products:
             return (
-                "ขออภัย ขณะนี้ Mock Provider ยังไม่มีข้อมูลที่ตรงกับคำถามนี้ "
-                "กรุณาระบุชื่อสินค้า หรือ SKU ที่ต้องการสอบถาม "
-                "และโปรดติดต่อเจ้าหน้าที่เพื่อยืนยันข้อมูลเพิ่มเติม\n\n"
+                "ขออภัยค่ะ ขณะนี้ยังไม่มีข้อมูลที่ตรงกับคำถามของคุณ "
+                "กรุณาระบุชื่อสินค้าหรือรหัสสินค้าเพิ่มเติม "
+                "หรือสอบถามเจ้าหน้าที่เพื่อยืนยันข้อมูลค่ะ"
                 + disclaimer
             )
 
+        # Price-only questions
+        price_keywords = ("ราคา", "เท่าไหร่", "กี่บาท", "price", "cost")
+
+        asking_price = any(
+            keyword in query for keyword in price_keywords
+        )
+
+        if asking_price and len(products) == 1:
+            product = products[0]
+
+            return (
+                f"{product['name_th']} "
+                f"({product['name_en']}) "
+                f"มีราคา {product['price_thb']:,} บาทค่ะ "
+                f"\nรหัสสินค้า: {product['sku']}"
+                + disclaimer
+            )
+
+        # General product information
         lines = []
 
         for product in products:
             lines.append(
                 f"{product['name_th']} ({product['name_en']})\n"
-                f"SKU: {product['sku']}\n"
-                f"ราคา: {product['price_thb']:,} บาท\n"
-                f"รายละเอียด: {product['specifications']}"
+                f"รหัสสินค้า: {product['sku']}\n"
+                f"ราคา: {product['price_thb']:,} บาท"
             )
 
         return (
-            "พบข้อมูลสินค้าจากฐานข้อมูล VITALFORM Demo ดังนี้:\n\n"
+            "ข้อมูลสินค้าที่ตรงกับคำถามของคุณ:\n\n"
             + "\n\n".join(lines)
-            + "\n\n"
             + disclaimer
         )
+
 
     @staticmethod
     def _build_mock_field_value(
