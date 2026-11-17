@@ -198,7 +198,7 @@ class AIFactory:
             return 0.0 if not products else 0.85
 
         if name in {"sources", "citations", "references"}:
-            return ["VITALFORM synthetic demo catalog"]
+            return []
 
         # Support Optional, Union and Literal annotations.
         origin = get_origin(annotation)
@@ -288,6 +288,7 @@ class AIFactory:
 
         return response_schema.model_validate(mock_data)
 
+   
     @staticmethod
     def _call_gemini_with_retry(
         client: genai.Client,
@@ -296,12 +297,26 @@ class AIFactory:
         model_name: str = "gemini-3.8-flash",
         max_retries: int = 4
     ) -> Any:
-        transient_error_codes = (
-            "500", "502", "503", "504",
-            "INTERNAL", "UNAVAILABLE",
-            "RESOURCE_EXHAUSTED", "429"
-        )
+        """
+        Calls Gemini with retry handling.
+
+        - Temporary errors: retry with exponential backoff.
+        - Daily quota exhausted: immediately raise to trigger Mock fallback.
+        - Other errors: immediately raise to the caller.
+        """
+
         last_exception = None
+
+        transient_error_codes = (
+            "500",
+            "502",
+            "503",
+            "504",
+            "INTERNAL",
+            "UNAVAILABLE",
+            "RESOURCE_EXHAUSTED",
+            "429",
+        )
 
         for attempt in range(max_retries):
             try:
@@ -313,30 +328,78 @@ class AIFactory:
                         response_schema=response_schema,
                     ),
                 )
+
                 return response_schema.model_validate_json(response.text)
 
             except Exception as e:
                 last_exception = e
                 error_msg = str(e)
-                
-                is_transient = False
-                for code in transient_error_codes:
-                    if code in error_msg:
-                        is_transient = True
-                        break
+                error_lower = error_msg.lower()
 
-                if is_transient and attempt < max_retries - 1:
-                    wait_time = (2 ** attempt) + random.uniform(0.1, 0.5)
-                    logger.warning(
-                        f"Gemini ({model_name}) transient error (attempt {attempt + 1}/{max_retries}). "
-                        f"Retrying in {wait_time:.2f}s... Error: {error_msg}"
+                # 1. Detect daily quota exhaustion.
+                # Retrying cannot fix a daily request limit.
+                is_daily_quota = any(
+                    indicator in error_lower
+                    for indicator in (
+                        "per day",
+                        "requestsperday",
+                        "generate_content_free_tier_requests",
+                        "per_day",
                     )
+                )
+
+                if is_daily_quota:
+                    logger.error(
+                        "Gemini daily quota exhausted for %s. "
+                        "Skipping retries and triggering fallback. Error: %s",
+                        model_name,
+                        error_msg,
+                    )
+                    raise
+
+                # 2. Detect temporary errors.
+                is_transient = any(
+                    code in error_msg
+                    for code in transient_error_codes
+                )
+
+                # 3. Retry temporary errors if attempts remain.
+                if is_transient and attempt < max_retries - 1:
+                    wait_time = (
+                        (2 ** attempt) + random.uniform(0.1, 0.5)
+                    )
+
+                    logger.warning(
+                        "Gemini (%s) transient error "
+                        "(attempt %s/%s). Retrying in %.2fs. Error: %s",
+                        model_name,
+                        attempt + 1,
+                        max_retries,
+                        wait_time,
+                        error_msg,
+                    )
+
                     time.sleep(wait_time)
                     continue
 
-                raise e
+                # 4. Stop retrying and let generate_structured_json()
+                # handle the error and activate the fallback.
+                logger.error(
+                    "Gemini (%s) failed after attempt %s/%s. "
+                    "Passing error to fallback handler. Error: %s",
+                    model_name,
+                    attempt + 1,
+                    max_retries,
+                    error_msg,
+                )
+                raise
 
-        raise last_exception
+        # Defensive fallback; normally the loop either returns or raises.
+        if last_exception:
+            raise last_exception
+
+        raise RuntimeError("Gemini request failed without an exception.")
+
 
 
     @staticmethod
