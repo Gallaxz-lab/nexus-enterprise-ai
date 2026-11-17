@@ -8,6 +8,11 @@ from pydantic import BaseModel
 from google import genai
 from google.genai import types
 from app.config import settings
+from typing import Any, Optional, get_args, get_origin, Union, Literal
+from enum import Enum
+
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +88,105 @@ class AIFactory:
         )
         tool_input = response.content[0].input
         return response_schema.model_validate(tool_input)
+    
+    @staticmethod
+    def _build_mock_value(annotation: Any, field_name: str = "") -> Any:
+        """Generate predictable, schema-valid demo values without an API key."""
+        origin = get_origin(annotation)
+        args = get_args(annotation)
+        name = field_name.lower()
+
+        # Handle Optional and Union types (supports both typing.Union and X | Y syntax)
+        if origin is Union or getattr(origin, "__name__", "") == "UnionType":
+            non_none = [arg for arg in args if arg is not type(None)]
+            if not non_none:
+                return None
+            return AIFactory._build_mock_value(non_none[0], field_name)
+
+        # Handle Literal values
+        if origin is Literal:
+            return args[0]
+
+        # Handle lists
+        if origin is list:
+            item_type = args[0] if args else str
+            return [AIFactory._build_mock_value(item_type, field_name)]
+
+        # Handle dictionaries
+        if origin is dict:
+            key_type, value_type = args if len(args) == 2 else (str, str)
+            key = AIFactory._build_mock_value(key_type, "key")
+            value = AIFactory._build_mock_value(value_type, field_name)
+            return {str(key): value}
+
+        # Handle enums
+        if isinstance(annotation, type) and issubclass(annotation, Enum):
+            return list(annotation)[0].value
+
+        # Handle nested Pydantic models
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            return AIFactory._build_mock_model(annotation)
+
+        # Generate useful field-specific demo values
+        if annotation is str:
+            if "email" in name:
+                return "demo@example.com"
+            if "name" in name:
+                return "Demo User"
+            if "title" in name:
+                return "Demo Analysis"
+            if "status" in name:
+                return "completed"
+            if "category" in name:
+                return "General"
+            if "summary" in name:
+                return "This is a simulated summary generated in demo mode."
+            if "answer" in name:
+                return "This is a simulated answer. Live AI generation is currently unavailable."
+            if "recommendation" in name:
+                return "Review the available information and verify before taking action."
+            if "message" in name:
+                return "Mock mode is active. This response is for demonstration purposes."
+            return "Demo response (mock mode)."
+
+        if annotation is bool:
+            return True
+
+        if annotation is int:
+            return 1
+
+        if annotation is float:
+            return 0.95
+
+        return None
+
+    @staticmethod
+    def _build_mock_model(response_schema: type[BaseModel]) -> BaseModel:
+        """Build a Pydantic-valid mock response using the requested schema."""
+        mock_data = {}
+
+        for field_name, field in response_schema.model_fields.items():
+            if not field.is_required():
+                if field.default_factory is not None:
+                    mock_data[field_name] = field.default_factory()
+                else:
+                    mock_data[field_name] = field.default
+            else:
+                mock_data[field_name] = AIFactory._build_mock_value(
+                    field.annotation,
+                    field_name
+                )
+
+        return response_schema.model_validate(mock_data)
+
+    @staticmethod
+    def _call_mock_structured(
+        prompt: str,
+        response_schema: type[BaseModel]
+    ) -> Any:
+        """Return schema-valid simulated data without calling an external AI."""
+        logger.warning("Mock AI provider activated. Returning simulated data.")
+        return AIFactory._build_mock_model(response_schema)
 
     @staticmethod
     def generate_structured_json(
