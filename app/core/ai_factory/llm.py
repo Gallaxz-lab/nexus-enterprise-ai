@@ -9,16 +9,285 @@ from google import genai
 from google.genai import types
 from app.config import settings
 from typing import Any, Optional, get_args, get_origin, Union, Literal
-from enum import Enum
-
-
-
 
 logger = logging.getLogger(__name__)
 
 class AIFactory:
     """Dynamically routes text and embedding requests to verified cloud model providers."""
     
+    VITALFORM_PRODUCTS = [
+        {
+            "sku": "VF-T100",
+            "name_th": "ลู่วิ่งไฟฟ้า RUNFORM T100",
+            "name_en": "RUNFORM T100 Treadmill",
+            "category": "fitness_equipment",
+            "price_thb": 12900,
+            "specifications": {
+                "motor": "2.0 CHP (demo rating)",
+                "speed_kmh": "1-14",
+                "incline": "Manual 3-level incline",
+                "running_surface_cm": "42 x 120",
+                "max_user_weight_kg": 110,
+                "foldable": True,
+                "programs": 12,
+                "dimensions_cm": "160 x 72 x 128",
+                "net_weight_kg": 48,
+                "warranty_demo": "Frame 1 year; motor 1 year; parts 6 months"
+            }
+        },
+        {
+            "sku": "VF-R20",
+            "name_th": "จักรยานออกกำลังกาย SPIN R20",
+            "name_en": "SPIN R20 Exercise Bike",
+            "category": "fitness_equipment",
+            "price_thb": 7900,
+            "specifications": {
+                "resistance": "8-level manual magnetic",
+                "flywheel_kg": 6,
+                "seat": "4-way adjustable",
+                "max_user_weight_kg": 100,
+                "dimensions_cm": "96 x 51 x 118",
+                "net_weight_kg": 25,
+                "warranty_demo": "Frame 1 year; parts 6 months"
+            }
+        },
+        {
+            "sku": "VF-D50",
+            "name_th": "ชุดดัมเบลปรับน้ำหนัก V-CORE D50",
+            "name_en": "V-CORE D50 Adjustable Dumbbell Set",
+            "category": "fitness_equipment",
+            "price_thb": 2490,
+            "specifications": {
+                "weight_per_dumbbell_kg": "2.5-10",
+                "increment_kg": 2.5,
+                "max_combined_weight_kg": 20,
+                "material": "Steel core with polymer-coated plates",
+                "warranty_demo": "6 months"
+            }
+        },
+        {
+            "sku": "VF-BP01",
+            "name_th": "เครื่องวัดความดันโลหิต CARE BP01",
+            "name_en": "CARE BP01 Upper-arm Blood Pressure Monitor",
+            "category": "healthcare",
+            "price_thb": 1290,
+            "specifications": {
+                "measurement": "Upper-arm oscillometric (demo description)",
+                "cuff_range_cm": "22-32",
+                "memory": "2 users x 60 readings",
+                "display": "LCD",
+                "power": "4 AA batteries or optional USB",
+                "warranty_demo": "1 year",
+                "safety_note": "Demo information only; not medical diagnosis"
+            }
+        },
+        {
+            "sku": "VF-S10",
+            "name_th": "เครื่องชั่งน้ำหนักดิจิทัล BALANCE S10",
+            "name_en": "BALANCE S10 Digital Scale",
+            "category": "healthcare",
+            "price_thb": 890,
+            "specifications": {
+                "capacity_kg": 180,
+                "graduation_kg": 0.1,
+                "display": "LCD",
+                "power": "2 AAA batteries",
+                "warranty_demo": "6 months"
+            }
+        }
+    ]
+
+    @staticmethod
+    def _find_vitalform_products(prompt: str) -> list[dict]:
+        """Find products mentioned in a customer question."""
+        query = prompt.lower()
+        matches = []
+
+        for product in AIFactory.VITALFORM_PRODUCTS:
+            searchable = [
+                product["sku"],
+                product["name_th"],
+                product["name_en"],
+                product["category"],
+            ]
+
+            if any(term.lower() in query for term in searchable):
+                matches.append(product)
+
+        # If the question asks about all products or comparisons,
+        # return the full catalog.
+        all_keywords = (
+            "ทั้งหมด", "all products", "ทุกสินค้า",
+            "เปรียบเทียบ", "compare", "comparison",
+            "รายการสินค้า", "catalog", "สินค้าอะไร"
+        )
+
+        if any(keyword in query for keyword in all_keywords):
+            return AIFactory.VITALFORM_PRODUCTS
+
+        return matches
+
+    @staticmethod
+    def _build_mock_answer(prompt: str, products: list[dict]) -> str:
+        """Create a factual customer-facing answer from the local catalog."""
+        disclaimer = (
+            "หมายเหตุ: นี่คือคำตอบจาก Mock Provider "
+            "โดยใช้ข้อมูลสินค้าสมมติสำหรับ Demo เท่านั้น "
+            "ไม่ใช่ข้อมูลหรือคำยืนยันจากผู้ผลิตจริง"
+        )
+
+        if not products:
+            return (
+                "ขออภัย ขณะนี้ Mock Provider ยังไม่มีข้อมูลที่ตรงกับคำถามนี้ "
+                "กรุณาระบุชื่อสินค้า หรือ SKU ที่ต้องการสอบถาม "
+                "และโปรดติดต่อเจ้าหน้าที่เพื่อยืนยันข้อมูลเพิ่มเติม\n\n"
+                + disclaimer
+            )
+
+        lines = []
+
+        for product in products:
+            lines.append(
+                f"{product['name_th']} ({product['name_en']})\n"
+                f"SKU: {product['sku']}\n"
+                f"ราคา: {product['price_thb']:,} บาท\n"
+                f"รายละเอียด: {product['specifications']}"
+            )
+
+        return (
+            "พบข้อมูลสินค้าจากฐานข้อมูล VITALFORM Demo ดังนี้:\n\n"
+            + "\n\n".join(lines)
+            + "\n\n"
+            + disclaimer
+        )
+
+    @staticmethod
+    def _build_mock_field_value(
+        field_name: str,
+        annotation: Any,
+        context: dict
+    ) -> Any:
+        """Build a schema-compatible value without calling an external LLM."""
+        name = field_name.lower()
+        products = context["products"]
+        answer = context["answer"]
+
+        # Map common response field names.
+        if name in {
+            "answer", "response", "reply", "message",
+            "content", "text", "output", "summary"
+        }:
+            return answer
+
+        if name in {"provider", "model_provider", "source_provider"}:
+            return "mock"
+
+        if name in {"is_mock", "mock_mode", "fallback_used"}:
+            return True
+
+        if name in {"products", "items", "results", "matched_products"}:
+            return products
+
+        if name in {"product", "matched_product"}:
+            return products[0] if products else None
+
+        if name in {"sku", "product_sku"}:
+            return products[0]["sku"] if products else ""
+
+        if name in {"confidence", "score"}:
+            return 0.0 if not products else 0.85
+
+        if name in {"sources", "citations", "references"}:
+            return ["VITALFORM synthetic demo catalog"]
+
+        # Support Optional, Union and Literal annotations.
+        origin = get_origin(annotation)
+        args = get_args(annotation)
+
+        if origin is Union:
+            non_none = [arg for arg in args if arg is not type(None)]
+            if not non_none:
+                return None
+            return AIFactory._build_mock_field_value(
+                field_name, non_none[0], context
+            )
+
+        if origin is Literal:
+            return args[0] if args else None
+
+        # Support lists and dictionaries.
+        if origin is list:
+            item_type = args[0] if args else Any
+            if name in {"products", "items", "results", "matched_products"}:
+                return products
+            return []
+
+        if origin is dict:
+            return {}
+        
+        # Support nested Pydantic models.
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            nested_data = {}
+
+            for nested_name, nested_field in annotation.model_fields.items():
+                nested_data[nested_name] = (
+                    AIFactory._build_mock_field_value(
+                        nested_name,
+                        nested_field.annotation,
+                        context
+                    )
+                )
+
+            return annotation.model_validate(nested_data)
+
+        # Primitive types.
+        if annotation is str:
+            return answer
+        if annotation is bool:
+            return False
+        if annotation is int:
+            return 0
+        if annotation is float:
+            return 0.0
+        if annotation is Any:
+            return answer
+
+        # Last-resort value for unknown annotations.
+        return None
+
+    @staticmethod
+    def _call_mock_structured(
+        prompt: str,
+        response_schema: type[BaseModel]
+    ) -> Any:
+        """Local VITALFORM fallback. No API key or network required."""
+        products = AIFactory._find_vitalform_products(prompt)
+        answer = AIFactory._build_mock_answer(prompt, products)
+
+        context = {
+            "products": products,
+            "answer": answer,
+        }
+
+        mock_data = {}
+
+        for field_name, field_info in response_schema.model_fields.items():
+            if not field_info.is_required():
+                continue
+
+            mock_data[field_name] = AIFactory._build_mock_field_value(
+                field_name,
+                field_info.annotation,
+                context
+            )
+
+        logger.warning(
+            "Using local Mock Provider. Matched %s VITALFORM product(s).",
+            len(products)
+        )
+
+        return response_schema.model_validate(mock_data)
+
     @staticmethod
     def _call_gemini_with_retry(
         client: genai.Client,
@@ -27,7 +296,14 @@ class AIFactory:
         model_name: str = "gemini-3.8-flash",
         max_retries: int = 4
     ) -> Any:
-        """Retries transient 503/429 errors with exponential backoff and jitter."""
+        error_codes = (
+            "500", "502", "503", "504",
+            "INTERNAL", "UNAVAILABLE",
+            "RESOURCE_EXHAUSTED", "429"
+            )
+
+        is_transient = any(code in error_str for code in error_codes)
+        
         last_exception = None
 
         for attempt in range(max_retries):
@@ -88,163 +364,137 @@ class AIFactory:
         )
         tool_input = response.content[0].input
         return response_schema.model_validate(tool_input)
-    
-    @staticmethod
-    def _build_mock_value(annotation: Any, field_name: str = "") -> Any:
-        """Generate predictable, schema-valid demo values without an API key."""
-        origin = get_origin(annotation)
-        args = get_args(annotation)
-        name = field_name.lower()
-
-        # Handle Optional and Union types (supports both typing.Union and X | Y syntax)
-        if origin is Union or getattr(origin, "__name__", "") == "UnionType":
-            non_none = [arg for arg in args if arg is not type(None)]
-            if not non_none:
-                return None
-            return AIFactory._build_mock_value(non_none[0], field_name)
-
-        # Handle Literal values
-        if origin is Literal:
-            return args[0]
-
-        # Handle lists
-        if origin is list:
-            item_type = args[0] if args else str
-            return [AIFactory._build_mock_value(item_type, field_name)]
-
-        # Handle dictionaries
-        if origin is dict:
-            key_type, value_type = args if len(args) == 2 else (str, str)
-            key = AIFactory._build_mock_value(key_type, "key")
-            value = AIFactory._build_mock_value(value_type, field_name)
-            return {str(key): value}
-
-        # Handle enums
-        if isinstance(annotation, type) and issubclass(annotation, Enum):
-            return list(annotation)[0].value
-
-        # Handle nested Pydantic models
-        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-            return AIFactory._build_mock_model(annotation)
-
-        # Generate useful field-specific demo values
-        if annotation is str:
-            if "email" in name:
-                return "demo@example.com"
-            if "name" in name:
-                return "Demo User"
-            if "title" in name:
-                return "Demo Analysis"
-            if "status" in name:
-                return "completed"
-            if "category" in name:
-                return "General"
-            if "summary" in name:
-                return "This is a simulated summary generated in demo mode."
-            if "answer" in name:
-                return "This is a simulated answer. Live AI generation is currently unavailable."
-            if "recommendation" in name:
-                return "Review the available information and verify before taking action."
-            if "message" in name:
-                return "Mock mode is active. This response is for demonstration purposes."
-            return "Demo response (mock mode)."
-
-        if annotation is bool:
-            return True
-
-        if annotation is int:
-            return 1
-
-        if annotation is float:
-            return 0.95
-
-        return None
-
-    @staticmethod
-    def _build_mock_model(response_schema: type[BaseModel]) -> BaseModel:
-        """Build a Pydantic-valid mock response using the requested schema."""
-        mock_data = {}
-
-        for field_name, field in response_schema.model_fields.items():
-            if not field.is_required():
-                if field.default_factory is not None:
-                    mock_data[field_name] = field.default_factory()
-                else:
-                    mock_data[field_name] = field.default
-            else:
-                mock_data[field_name] = AIFactory._build_mock_value(
-                    field.annotation,
-                    field_name
-                )
-
-        return response_schema.model_validate(mock_data)
-
-    @staticmethod
-    def _call_mock_structured(
-        prompt: str,
-        response_schema: type[BaseModel]
-    ) -> Any:
-        """Return schema-valid simulated data without calling an external AI."""
-        logger.warning("Mock AI provider activated. Returning simulated data.")
-        return AIFactory._build_mock_model(response_schema)
 
     @staticmethod
     def generate_structured_json(
-        prompt: str, 
-        response_schema: type[BaseModel], 
+        prompt: str,
+        response_schema: type[BaseModel],
         provider: Optional[str] = None
     ) -> Any:
-        """Forces the selected model to return pure data matching a strict Pydantic template."""
+        """
+        Routes structured generation to the selected provider.
+        Gemini overload falls back to another configured provider,
+        then to the local Mock Provider.
+        """
         target_provider = provider or settings.DEFAULT_LLM_PROVIDER
+
+        # Explicit local Mock mode
+        if target_provider == "mock":
+            return AIFactory._call_mock_structured(prompt, response_schema)
 
         if target_provider == "openai":
             if not settings.OPENAI_API_KEY:
-                raise HTTPException(status_code=500, detail="OpenAI API key missing.")
+                raise HTTPException(
+                    status_code=500,
+                    detail="OpenAI API key missing."
+                )
+
             try:
-                return AIFactory._call_openai_structured(prompt, response_schema)
+                return AIFactory._call_openai_structured(
+                    prompt, response_schema
+                )
             except Exception as e:
-                raise HTTPException(status_code=502, detail=f"OpenAI SDK Error: {str(e)}")
-        
+                logger.exception("OpenAI generation failed.")
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"OpenAI SDK Error: {str(e)}"
+                )
+
         elif target_provider == "gemini":
             if not settings.GEMINI_API_KEY:
-                raise HTTPException(status_code=500, detail="Gemini API key missing.")
+                logger.warning(
+                    "Gemini API key missing. Falling back to local Mock Provider."
+                )
+                return AIFactory._call_mock_structured(
+                    prompt, response_schema
+                )
+
             try:
                 client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
                 return AIFactory._call_gemini_with_retry(
                     client=client,
                     prompt=prompt,
                     response_schema=response_schema,
                     model_name="gemini-3.8-flash"
                 )
+
             except Exception as gemini_err:
                 error_str = str(gemini_err)
-                is_overload = any(code in error_str for code in ("503", "UNAVAILABLE", "429"))
 
-                # Automatic cross-provider fallback if Gemini is overloaded and another key exists
-                if is_overload and settings.OPENAI_API_KEY:
-                    logger.warning("Gemini overloaded after retries. Falling back to OpenAI.")
+                overload_codes = (
+                    "500", "502", "503", "504",
+                    "INTERNAL", "UNAVAILABLE",
+                    "RESOURCE_EXHAUSTED", "429"
+                )
+
+                is_overload = any(
+                    code in error_str for code in overload_codes
+                )
+
+                if not is_overload:
+                    logger.exception(
+                        "Gemini failed with a non-overload error."
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Gemini SDK Error: {error_str}"
+                    )
+
+                logger.warning(
+                    "Gemini overloaded after retries. Starting fallback chain."
+                )
+
+                # Optional OpenAI fallback
+                if settings.OPENAI_API_KEY:
                     try:
-                        return AIFactory._call_openai_structured(prompt, response_schema)
+                        logger.info("Trying OpenAI fallback.")
+                        return AIFactory._call_openai_structured(
+                            prompt, response_schema
+                        )
                     except Exception as openai_err:
-                        logger.error(f"OpenAI fallback also failed: {openai_err}")
+                        logger.error(
+                            "OpenAI fallback failed: %s", openai_err
+                        )
 
-                if is_overload and settings.ANTHROPIC_API_KEY:
-                    logger.warning("Gemini overloaded after retries. Falling back to Anthropic.")
+                # Optional Anthropic fallback
+                if settings.ANTHROPIC_API_KEY:
                     try:
-                        return AIFactory._call_anthropic_structured(prompt, response_schema)
+                        logger.info("Trying Anthropic fallback.")
+                        return AIFactory._call_anthropic_structured(
+                            prompt, response_schema
+                        )
                     except Exception as anthropic_err:
-                        logger.error(f"Anthropic fallback also failed: {anthropic_err}")
+                        logger.error(
+                            "Anthropic fallback failed: %s", anthropic_err
+                        )
 
-                status_code = 503 if is_overload else 502
-                raise HTTPException(status_code=status_code, detail=f"Gemini SDK Error: {error_str}")
+                # Final fallback: Local Mock Provider
+                logger.warning(
+                    "Cloud providers unavailable. Using local Mock Provider."
+                )
+
+                return AIFactory._call_mock_structured(
+                    prompt, response_schema
+                )
 
         elif target_provider == "anthropic":
             if not settings.ANTHROPIC_API_KEY:
-                raise HTTPException(status_code=500, detail="Anthropic API key missing.")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Anthropic API key missing."
+                )
+
             try:
-                return AIFactory._call_anthropic_structured(prompt, response_schema)
+                return AIFactory._call_anthropic_structured(
+                    prompt, response_schema
+                )
             except Exception as e:
-                raise HTTPException(status_code=502, detail=f"Anthropic SDK Error: {str(e)}")
+                logger.exception("Anthropic generation failed.")
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Anthropic SDK Error: {str(e)}"
+                )
 
         else:
             raise HTTPException(
